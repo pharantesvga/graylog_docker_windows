@@ -1,0 +1,21 @@
+filebeat.inputs:
+  - type: log
+    enabled: true
+    paths:
+      - /var/log/*.log
+      - /var/log/squid/*.log
+      - /var/log/nginx/*.log
+
+output.logstash:
+  hosts: ["graylog:5044"]
+  ssl.certificate_authorities: ["/etc/graylog-ssl/beats.crt"]
+  # O certificado do input Beats do Graylog é emitido para o hostname
+  # "beats.graylog.esr.local" (CN/SAN), diferente do nome "graylog" usado
+  # para resolver o container na rede Docker interna. "certificate" valida
+  # a cadeia de CA sem exigir esse match de hostname — aceitável aqui por
+  # se tratar de certificado autoassinado já confiado explicitamente via
+  # certificate_authorities. Ver armadilha correspondente no handover.
+  ssl.verification_mode: certificate
+
+logging.level: info
+logging.to_stderr: true

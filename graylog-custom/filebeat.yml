@@ -1,0 +1,26 @@
+filebeat.inputs:
+  - type: log
+    enabled: true
+    paths:
+      - /var/log/*.log
+
+output.logstash:
+  # Diferente do linserver (que aponta para "graylog:5044" via rede Docker),
+  # este Filebeat roda DENTRO do próprio container graylog — o destino é
+  # local, sem depender do DNS interno do Docker.
+  hosts: ["localhost:5044"]
+  # Caminho real do certificado neste container: é a origem do certificado
+  # dentro da própria estrutura de configuração do Graylog
+  # (/etc/graylog/server/ssl/beats.crt), diferente do caminho distribuído
+  # /etc/graylog-ssl/beats.crt usado no linserver, que é uma cópia.
+  # Confirmado via find durante o troubleshooting desta sessão.
+  ssl.certificate_authorities: ["/etc/graylog/server/ssl/beats.crt"]
+  # Mesmo raciocínio do filebeat.yml do linserver: o certificado é emitido
+  # para o hostname "beats.graylog.esr.local", diferente de "localhost"
+  # usado aqui como destino. "certificate" valida a cadeia de CA sem
+  # exigir esse match de hostname — aceitável por se tratar de certificado
+  # autoassinado já confiado explicitamente via certificate_authorities.
+  ssl.verification_mode: certificate
+
+logging.level: info
+logging.to_stderr: true

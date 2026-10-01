@@ -1,0 +1,9 @@
+version: "2.0"
+services:
+  grokdebug:
+    image: lunderhage/docker-grokdebug:1.0
+    build: .
+    network_mode: bridge
+    ports:
+        - "127.0.0.1:8080:80"
+

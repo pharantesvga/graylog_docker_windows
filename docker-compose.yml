@@ -1,0 +1,163 @@
+# docker-compose.yml - Ambiente integrado: Graylog 7.0 (Open Core + DataNode),
+# linserver (LDAP/SSH/NTP + utilitário up) e grok-debugger
+# Recomendado para ambiente de teste/desenvolvimento
+
+services:
+  # ---------------------------------------------------------------------
+  # MongoDB - Graylog 7.0 exige MongoDB 7.0 ou superior
+  # ---------------------------------------------------------------------
+  mongodb:
+    image: "mongo:7.0"
+    restart: "unless-stopped"
+    networks:
+      - graylog
+    volumes:
+      - "mongodb_data:/data/db"
+      - "mongodb_config:/data/configdb"
+
+  # ---------------------------------------------------------------------
+  # Graylog Data Node (substitui o OpenSearch antigo)
+  # ---------------------------------------------------------------------
+  datanode:
+    image: "${DATANODE_IMAGE:-graylog/graylog-datanode:7.0}"
+    hostname: "datanode"
+    environment:
+      GRAYLOG_DATANODE_NODE_ID_FILE: "/var/lib/graylog-datanode/node-id"
+      # GRAYLOG_DATANODE_PASSWORD_SECRET e GRAYLOG_PASSWORD_SECRET devem ser iguais
+      GRAYLOG_DATANODE_PASSWORD_SECRET: "${GRAYLOG_PASSWORD_SECRET:?Please configure GRAYLOG_PASSWORD_SECRET in the .env file}"
+      GRAYLOG_DATANODE_MONGODB_URI: "mongodb://mongodb:27017/graylog"
+    ulimits:
+      memlock:
+        hard: -1
+        soft: -1
+      nofile:
+        soft: 65536
+        hard: 65536
+    ports:
+      - "8999:8999/tcp"   # DataNode API
+      - "9200:9200/tcp"   # HTTP (para debug)
+      - "9300:9300/tcp"   # Transport
+    networks:
+      - graylog
+    volumes:
+      - "graylog-datanode:/var/lib/graylog-datanode"
+    restart: "unless-stopped"
+
+  # ---------------------------------------------------------------------
+  # Graylog Server (Open Core) - usuário admin / senha rnpesr
+  # (GRAYLOG_ROOT_PASSWORD_SHA2 no .env já corresponde ao sha256 de "rnpesr")
+  # ---------------------------------------------------------------------
+  graylog:
+    hostname: "server"
+    build:
+      context: ./graylog-custom
+      args:
+        GRAYLOG_BASE_IMAGE: "${GRAYLOG_IMAGE:-graylog/graylog:7.0}"
+    depends_on:
+      mongodb:
+        condition: "service_started"
+      datanode:
+        condition: "service_started"
+      linserver:
+        condition: "service_started"   # graylog depende do linserver como servidor NTP
+    cap_add:
+      - SYS_TIME   # necessário para o chronyd (embutido na imagem) poder ajustar o relógio
+      - AUDIT_CONTROL # necessário para o auditbeat
+      - AUDIT_READ # necessário para o auditbeat
+    pid: "host"
+    environment:
+      TZ: "America/Sao_Paulo"
+      GRAYLOG_NODE_ID_FILE: "/usr/share/graylog/data/data/node-id"
+      GRAYLOG_PASSWORD_SECRET: "${GRAYLOG_PASSWORD_SECRET:?Please configure GRAYLOG_PASSWORD_SECRET in the .env file}"
+      GRAYLOG_ROOT_PASSWORD_SHA2: "${GRAYLOG_ROOT_PASSWORD_SHA2:?Please configure GRAYLOG_ROOT_PASSWORD_SHA2 in the .env file}"
+      GRAYLOG_ROOT_USERNAME: "admin"
+      GRAYLOG_HTTP_BIND_ADDRESS: "0.0.0.0:9000"
+      GRAYLOG_HTTP_EXTERNAL_URI: "http://graylog.esr.local:9000/"
+      GRAYLOG_MONGODB_URI: "mongodb://mongodb:27017/graylog"
+      GRAYLOG_ROOT_TIMEZONE: "America/Sao_Paulo"
+    ports:
+      - "5044:5044/tcp"   # Beats
+      - "5140:5140/udp"   # Syslog UDP
+      - "5140:5140/tcp"   # Syslog TCP
+      - "5555:5555/tcp"   # RAW TCP
+      - "5555:5555/udp"   # RAW UDP
+      - "9000:9000/tcp"   # Web Interface + API (acesso direto/depuração; o
+                          # acesso normal via navegador, sem porta, é feito
+                          # por http://graylog.esr.local/, através do
+                          # reverse proxy do Nginx no linserver)
+      - "12201:12201/tcp" # GELF TCP
+      - "12201:12201/udp" # GELF UDP
+      - "13301:13301/tcp" # Forwarder data
+      - "13302:13302/tcp" # Forwarder config
+    networks:
+      - graylog
+    volumes:
+      - "graylog_data:/usr/share/graylog/data/data"
+      - "graylog_ssl:/etc/graylog/server/ssl"
+    restart: "unless-stopped"
+
+  # ---------------------------------------------------------------------
+  # linserver - Ubuntu com SSH, LDAP (OpenLDAP), NTP (chrony), Nginx,
+  # Squid, Filebeat e a ferramenta 'up' (https://github.com/akavel/up)
+  # instalados.
+  #
+  # O Nginx deste container é o ponto de entrada único da porta 80 do
+  # host para os DOIS serviços web do laboratório: serve o conteúdo local
+  # do linserver (server_name linserver) e faz reverse proxy para a UI do
+  # Graylog (server_name graylog.esr.local -> http://graylog:9000). Isso
+  # permite acessar ambos via navegador sem especificar porta, resolvendo
+  # os dois hostnames para o mesmo host físico (roteamento por Host
+  # header, já que só é possível publicar a porta 80 uma vez por host).
+  # ---------------------------------------------------------------------
+  linserver:
+    build:
+      context: .
+      dockerfile: dockerfile
+    ulimits:
+      nofile:
+        soft: 4096
+        hard: 4096
+    hostname: "linserver"
+    container_name: "linserver"
+    privileged: true   # necessário para rodar Docker-in-Docker (dockerd dentro do container)
+    cap_add:
+      - SYS_TIME   # necessário para o chronyd poder ajustar o relógio do sistema (adjtimex)
+    ports:
+      - "2222:22/tcp"    # SSH
+      - "389:389/tcp"    # LDAP
+      - "123:123/udp"    # NTP
+      - "80:80/tcp"      # HTTP (Nginx: vhost local + reverse proxy do Graylog)
+    networks:
+      - graylog
+    volumes:
+      # Somente leitura: o Filebeat precisa do CA (beats.crt) gerado pelo
+      # container graylog no primeiro boot para validar o certificado
+      # autoassinado do input Beats TLS (ver entrypoint.sh, seção 8d).
+      - "graylog_ssl:/etc/graylog-ssl:ro"
+    restart: "unless-stopped"
+
+  # ---------------------------------------------------------------------
+  # grok-debugger - baseado em https://github.com/luizclaubertss/docker-grokdebug
+  # OBS: a imagem "lunderhage/docker-grokdebug:1.0" citada no compose
+  # original do repositório nunca foi publicada no Docker Hub, então o
+  # build é feito diretamente a partir do Dockerfile do repositório Git.
+  # ---------------------------------------------------------------------
+  grokdebug:
+    build:
+      context: "./docker-grokdebug"
+    container_name: "grokdebug"
+    network_mode: "bridge"
+    ports:
+      - "8080:80"
+    restart: "unless-stopped"
+
+networks:
+  graylog:
+    driver: "bridge"
+
+volumes:
+  mongodb_data:
+  mongodb_config:
+  graylog-datanode:
+  graylog_data:
+  graylog_ssl:

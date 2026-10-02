@@ -8,7 +8,7 @@ services:
   # ---------------------------------------------------------------------
   mongodb:
     image: "mongo:7.0"
-    restart: "unless-stopped"
+    restart: "no"
     networks:
       - graylog
     volumes:
@@ -41,7 +41,7 @@ services:
       - graylog
     volumes:
       - "graylog-datanode:/var/lib/graylog-datanode"
-    restart: "unless-stopped"
+    restart: "no"
 
   # ---------------------------------------------------------------------
   # Graylog Server (Open Core) - usuário admin / senha rnpesr
@@ -94,7 +94,7 @@ services:
     volumes:
       - "graylog_data:/usr/share/graylog/data/data"
       - "graylog_ssl:/etc/graylog/server/ssl"
-    restart: "unless-stopped"
+    restart: "no"
 
   # ---------------------------------------------------------------------
   # linserver - Ubuntu com SSH, LDAP (OpenLDAP), NTP (chrony), Nginx,
@@ -134,7 +134,7 @@ services:
       # container graylog no primeiro boot para validar o certificado
       # autoassinado do input Beats TLS (ver entrypoint.sh, seção 8d).
       - "graylog_ssl:/etc/graylog-ssl:ro"
-    restart: "unless-stopped"
+    restart: "no"
 
   # ---------------------------------------------------------------------
   # grok-debugger - baseado em https://github.com/luizclaubertss/docker-grokdebug
@@ -149,7 +149,7 @@ services:
     network_mode: "bridge"
     ports:
       - "8080:80"
-    restart: "unless-stopped"
+    restart: "no"
 
 networks:
   graylog:

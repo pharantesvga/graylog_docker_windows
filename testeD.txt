@@ -1,1 +1,2 @@
 adicionando um novo arquivo para teste do fetch
+adicionando segunda linha neste arquivo
